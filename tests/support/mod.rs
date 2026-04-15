@@ -1,34 +1,32 @@
-use assert_cmd::prelude::*;
 use hickory_proto::op::{Message, MessageType, ResponseCode};
 use hickory_proto::rr::domain::Name;
 use hickory_proto::rr::rdata::PTR;
 use hickory_proto::rr::{RData, Record, RecordType};
-use predicates::prelude::*;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, UdpSocket};
-use std::process::Command;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-const TEST_RESOLVERS_ENV: &str = "DNS_CHECK_TEST_RESOLVERS";
+pub const TEST_RESOLVERS_ENV: &str = "DNS_CHECK_TEST_RESOLVERS";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ObservedQuery {
-    name: String,
-    record_type: RecordType,
+pub struct ObservedQuery {
+    pub name: String,
+    pub record_type: RecordType,
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
-enum MockResponse {
+pub enum MockResponse {
     Address(Ipv4Addr),
     NxDomain,
     Ptr(&'static str),
 }
 
-struct MockResolver {
+pub struct MockResolver {
     socket_addr: SocketAddr,
     queries: Arc<Mutex<Vec<ObservedQuery>>>,
     shutdown: Arc<AtomicBool>,
@@ -37,7 +35,7 @@ struct MockResolver {
 }
 
 impl MockResolver {
-    fn spawn(response: MockResponse) -> Self {
+    pub fn spawn(response: MockResponse) -> Self {
         let tcp_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let socket_addr = tcp_listener.local_addr().unwrap();
         let udp_socket = UdpSocket::bind(socket_addr).unwrap();
@@ -71,11 +69,11 @@ impl MockResolver {
         }
     }
 
-    fn socket_addr(&self) -> SocketAddr {
+    pub fn socket_addr(&self) -> SocketAddr {
         self.socket_addr
     }
 
-    fn queries(&self) -> Vec<ObservedQuery> {
+    pub fn queries(&self) -> Vec<ObservedQuery> {
         self.queries.lock().unwrap().clone()
     }
 }
@@ -92,83 +90,6 @@ impl Drop for MockResolver {
             handle.join().unwrap();
         }
     }
-}
-
-#[test]
-fn ptr_lookup_normalizes_ip_inputs() {
-    let resolver = MockResolver::spawn(MockResponse::Ptr("dns.google."));
-
-    Command::cargo_bin("dns-check-rust")
-        .unwrap()
-        .env(TEST_RESOLVERS_ENV, resolver.socket_addr().to_string())
-        .args(["8.8.8.8", "PTR"])
-        .assert()
-        .success()
-        .stderr(predicate::str::is_empty())
-        .stdout(predicate::str::contains("dns.google"));
-
-    let queries = resolver.queries();
-    assert!(queries.iter().any(|query| {
-        query.record_type == RecordType::PTR && query.name == "8.8.8.8.in-addr.arpa."
-    }));
-    assert!(!queries.iter().any(|query| query.name == "8.8.8.8."));
-}
-
-#[test]
-fn missing_args_exit_with_usage_error() {
-    Command::cargo_bin("dns-check-rust")
-        .unwrap()
-        .assert()
-        .failure()
-        .code(2)
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains(
-            "Usage: dns-check-rust <domain> <record_type>",
-        ));
-}
-
-#[test]
-fn all_failed_lookups_exit_non_zero() {
-    let resolver_a = MockResolver::spawn(MockResponse::NxDomain);
-    let resolver_b = MockResolver::spawn(MockResponse::NxDomain);
-
-    Command::cargo_bin("dns-check-rust")
-        .unwrap()
-        .env(
-            TEST_RESOLVERS_ENV,
-            format!("{},{}", resolver_a.socket_addr(), resolver_b.socket_addr()),
-        )
-        .args(["missing.example", "A"])
-        .assert()
-        .failure()
-        .code(1)
-        .stdout(predicate::str::is_empty())
-        .stderr(
-            predicate::str::contains(format!("Error querying {}", resolver_a.socket_addr()))
-                .and(predicate::str::contains(format!(
-                    "Error querying {}",
-                    resolver_b.socket_addr()
-                )))
-                .and(predicate::str::contains("NXDomain"))
-                .and(predicate::str::contains("All DNS lookups failed.")),
-        );
-}
-
-#[test]
-fn any_queries_are_rejected_before_lookup() {
-    let resolver = MockResolver::spawn(MockResponse::Address(Ipv4Addr::new(127, 0, 0, 1)));
-
-    Command::cargo_bin("dns-check-rust")
-        .unwrap()
-        .env(TEST_RESOLVERS_ENV, resolver.socket_addr().to_string())
-        .args(["example.com", "ANY"])
-        .assert()
-        .failure()
-        .code(2)
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("Unsupported record type: ANY"));
-
-    assert!(resolver.queries().is_empty());
 }
 
 fn spawn_udp_server(
