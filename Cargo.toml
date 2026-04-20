@@ -11,6 +11,6 @@ hickory-resolver = "0.25.2"
 tokio = { version = "1.38.2", features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
-assert_cmd = "2.0.16"
+assert_cmd = "2.2.1"
 hickory-proto = "0.25.2"
 predicates = "3.1.2"
